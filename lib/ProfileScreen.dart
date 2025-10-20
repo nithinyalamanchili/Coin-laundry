@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'main.dart'; // replace with your login screen
 import 'AccountSettingsScreen.dart';
+import 'NotificationPreferenceScreen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -181,7 +182,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     },
                   ),
 
-                  const _ProfileOption(icon: Icons.notifications_off, label: "Notification preference"),
+                  _ProfileOption(
+                    icon: Icons.notifications_active,
+                    label: "Notification preference",
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const NotificationPreferenceScreen()),
+                      );
+                    },
+                  ),
+
                   _ProfileOption(
                     icon: Icons.phone,
                     label: "Support",
@@ -210,10 +221,68 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _ProfileOption(
                     icon: Icons.delete,
                     label: "Delete Account",
-                    onTap: () {
-                      // TODO: Implement delete account
+                    onTap: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text(
+                            "Delete Account",
+                            style: TextStyle(
+                              color: Color(0xFF692C5A),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          content: const Text(
+                            "Deleting your account will result in permanent loss of all your account "
+                                "information, including your wallet.\n\n"
+                                "Please note that account deletion takes 30 days to complete. "
+                                "Are you sure you want to proceed?",
+                            style: TextStyle(height: 1.4),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(16)),
+                          ),
+                          actionsPadding: const EdgeInsets.only(right: 16, bottom: 8),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text(
+                                "CANCEL",
+                                style: TextStyle(
+                                  color: Color(0xFF692C5A),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text(
+                                "YES,PROCEED",
+                                style: TextStyle(
+                                  color: Color(0xFF692C5A),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (confirm == true) {
+                        final prefs = await SharedPreferences.getInstance();
+                        final token = prefs.getString('auth_token');
+                        await prefs.clear();
+                        Navigator.of(context).pushAndRemoveUntil(
+                          MaterialPageRoute(builder: (context) => const LoginScreen()),
+                              (route) => false,
+                        );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text("Account Delete Request Sucessfull")),
+                        );
+                      }
                     },
                   ),
+
                   _ProfileOption(
                     icon: Icons.logout,
                     label: "Logout",

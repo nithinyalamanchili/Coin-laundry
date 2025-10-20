@@ -117,7 +117,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
               _buildTextField("First name", firstName, (val) => firstName = val),
               _buildTextField("Last name", lastName, (val) => lastName = val),
               _buildTextField("Mobile Number", mobile, (val) => mobile = val),
-              _buildTextField("Email", email, (val) => email = val),
+              _buildemailTextField("Email", email, (val) => email = val),
               _buildDatePickerField(context),
               const SizedBox(height: 12),
               const Align(
@@ -137,10 +137,10 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white,
                   foregroundColor: const Color(0xFF692C5A),
-                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 200, vertical: 16),
                 ),
                 onPressed: _submit,
-                child: const Text("Submit"),
+                child: const Text("Update"),
               )
             ],
           ),
@@ -150,6 +150,22 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   }
 
   Widget _buildTextField(String label, String initialValue, Function(String) onSaved) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: TextFormField(
+        initialValue: initialValue,
+        readOnly: true,
+        decoration: InputDecoration(
+          labelText: label,
+          filled: true,
+          fillColor: Colors.white,
+        ),
+        onSaved: (val) => onSaved(val ?? ''),
+      ),
+    );
+  }
+
+  Widget _buildemailTextField(String label, String initialValue, Function(String) onSaved) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: TextFormField(
@@ -168,23 +184,23 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: GestureDetector(
-        onTap: () async {
-          final pickedDate = await showDatePicker(
-            context: context,
-            initialDate: dob.isNotEmpty
-                ? DateTime.tryParse(dob) ?? DateTime.now()
-                : DateTime.now(),
-            firstDate: DateTime(1900),
-            lastDate: DateTime.now(),
-          );
-
-          if (pickedDate != null) {
-            setState(() {
-              dob =
-              "${pickedDate.year.toString().padLeft(4, '0')}-${pickedDate.month.toString().padLeft(2, '0')}-${pickedDate.day.toString().padLeft(2, '0')}";
-            });
-          }
-        },
+        // onTap: () async {
+        //   final pickedDate = await showDatePicker(
+        //     context: context,
+        //     initialDate: dob.isNotEmpty
+        //         ? DateTime.tryParse(dob) ?? DateTime.now()
+        //         : DateTime.now(),
+        //     firstDate: DateTime(1900),
+        //     lastDate: DateTime.now(),
+        //   );
+        //
+        //   if (pickedDate != null) {
+        //     setState(() {
+        //       dob =
+        //       "${pickedDate.year.toString().padLeft(4, '0')}-${pickedDate.month.toString().padLeft(2, '0')}-${pickedDate.day.toString().padLeft(2, '0')}";
+        //     });
+        //   }
+        // },
         child: AbsorbPointer(
           child: TextFormField(
             decoration: const InputDecoration(

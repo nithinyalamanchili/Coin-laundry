@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'bottom_nav.dart';
 
 class AllOrdersScreen extends StatelessWidget {
   final List<dynamic> orders;
@@ -13,8 +14,9 @@ class AllOrdersScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    print("🧾 All Orders: ${orders.toString()}");
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F8F8),
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: const Color(0xFF692C5A),
         title: const Text('Rewarded Coins'),
@@ -78,15 +80,24 @@ class AllOrdersScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Expanded(
+            child:Container(
+              color: Colors.white,
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: orders.length,
               itemBuilder: (context, index) {
                 final order = orders[index];
-                return Row(
+                final reward = order['rewardAmount'] ?? 0;
+                final machineName = order['franchise']?['name'] ?? 'Unknown';
+                final orderId = order['id'];
+                final amount = order['amount'] ?? 0;
+
+                return Container(
+                color: Colors.white,
+                child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Timeline dot
+                    // Timeline dot and line
                     Column(
                       children: [
                         Container(
@@ -100,39 +111,77 @@ class AllOrdersScreen extends StatelessWidget {
                         if (index != orders.length - 1)
                           Container(
                             width: 2,
-                            height: 60,
+                            height: 70,
                             color: Colors.green,
                           ),
                       ],
                     ),
                     const SizedBox(width: 16),
+
+                    // Order info
                     Expanded(
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 20),
                         child: Column(
+
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text("Testing7", style: TextStyle(fontWeight: FontWeight.bold)),
+                            Text(
+                              machineName,
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
                             const SizedBox(height: 4),
                             Text(
                               formatDate(order['startTime']),
                               style: const TextStyle(color: Colors.grey),
                             ),
                             const SizedBox(height: 2),
-                            Text("Wash ID-${order['id']}", style: const TextStyle(color: Colors.grey)),
+                            Text(
+                              "Wash ID-$orderId",
+                              style: const TextStyle(color: Colors.grey),
+                            ),
+                            const SizedBox(height: 4),
+
+                            // 🎉 Reward chip (only if reward > 0)
+                            if (reward > 0)
+                              Container(
+                                padding:
+                                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.green),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  "Kudos $reward coins added to wallet",
+                                  style: const TextStyle(
+                                    color: Colors.green,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
                     ),
+
+                    // Amount
                     const SizedBox(width: 8),
-                    const Text("1 INR", style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text(
+                      "$amount INR",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ],
+                ),
                 );
               },
+
             ),
+    ),
           ),
         ],
       ),
+      bottomNavigationBar: const BottomNav(currentIndex: 1),
     );
   }
 }

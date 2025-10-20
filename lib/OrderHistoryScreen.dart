@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'bottom_nav.dart';
+import 'QRScannerScreen.dart';
 
 class OrderHistoryScreen extends StatelessWidget {
   final List<dynamic> orders;
@@ -17,11 +19,19 @@ class OrderHistoryScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F8F8),
-      appBar: AppBar(
-        title: const Text('Order History'),
-        backgroundColor: const Color(0xFF692C5A),
-        foregroundColor: Colors.white,
-      ),
+        appBar: AppBar(
+          title: const Text('Order History'),
+          backgroundColor: const Color(0xFF692C5A),
+          foregroundColor: Colors.white,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const QRScannerScreen(orderType: 'self')),
+            ),
+          ),
+        ),
+
       body: sortedOrders.isEmpty
           ? const Center(child: Text("No orders available."))
           : ListView.builder(
@@ -90,6 +100,7 @@ class OrderHistoryScreen extends StatelessWidget {
           );
         },
       ),
+      bottomNavigationBar: BottomNav(currentIndex: 4),
     );
   }
 

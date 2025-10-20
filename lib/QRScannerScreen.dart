@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'WelcomeScreen.dart';
 import 'HomeScreen.dart';
 import 'bottom_nav.dart';
+import 'dart:math';
 
 
 import 'PaymentScreen.dart';
@@ -30,6 +31,8 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   bool _loading = false;
   bool _connecting = false;
 
+
+
   final TextEditingController machineIdController = TextEditingController();
   final TextEditingController _couponCtrl = TextEditingController();
   final MobileScannerController _scannerController = MobileScannerController();
@@ -45,6 +48,11 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   int? _userId;
   int? _franchiseId;
   int? _orderId;
+
+  int _discountInr = 0;
+  bool _couponApplied = false;
+  String _couponMsg = "";
+
 
   @override
   void initState() {
@@ -66,8 +74,81 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     super.dispose();
   }
 
-  void _onPaySuccess(PaymentSuccessResponse response) {
-    _showSnack('Payment successful');
+  Future<void> _showPaymentSuccessDialog(BuildContext context) async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: Colors.white,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ✅ Circle with tick animation
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0.0, end: 1.0),
+                  duration: const Duration(milliseconds: 800),
+                  builder: (context, value, child) {
+                    return Transform.scale(
+                      scale: value,
+                      child: Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.green, width: 4),
+                          color: Colors.green.withOpacity(0.1),
+                        ),
+                        child: Center(
+                          child: Icon(
+                            Icons.check,
+                            color: Colors.green,
+                            size: 60,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  "Payment Successful",
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF692C5A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text("Continue"),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+
+
+
+  void _onPaySuccess(PaymentSuccessResponse response) async {
+    await _showPaymentSuccessDialog(context); // 🎉 Show animated success popup
+
     if (_lastMachine != null && _lastWallet != null) {
       _goToPayment(_lastMachine!, _lastWallet!);
     }
@@ -415,57 +496,171 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     _payableInr = charges - walletDeduct;
 
     final enoughCoins = _payableInr == 0;
-    final btnLabel = enoughCoins ? 'Proceed with Deduction' : 'Proceed to Payment';
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Confirm Order'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _infoRow('Wallet Balance:', '$walletBal coin'),
-              _infoRow('Charges:', '$charges INR'),
-              _infoRow('Wallet Deductions:', '$walletDeduct coin'),
-              _infoRow('Wallet Deductions:', '0 coin'),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _couponCtrl,
-                decoration: const InputDecoration(hintText: 'Apply Coupon'),
+        bool applyDisabled = false; // 🔹 local state for Apply button
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Confirm Order'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _infoRow('Wallet Balance:', '$walletBal coin'),
+                  _infoRow('Charges:', '$charges INR'),
+                  _infoRow('Wallet Deductions:', '$walletDeduct coin'),
+                  _infoRow('Coupon Discount:', _couponApplied ? '-$_discountInr INR' : '0 INR'),
+                  const SizedBox(height: 8),
+
+                  // 🧾 Coupon input + Apply button
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _couponCtrl,
+                          enabled: !applyDisabled, // 🔹 disable input if applied
+                          decoration: const InputDecoration(
+                            hintText: 'Enter Coupon Code',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF692C5A),
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: applyDisabled
+                            ? null // 🔹 disable after success
+                            : () async {
+                          final code = _couponCtrl.text.trim();
+                          if (code.isEmpty) {
+                            _showSnack("Please enter a coupon code");
+                            return;
+                          }
+                          await _applyCoupon(code, setDialogState, () {
+                            setDialogState(() => applyDisabled = true); // ✅ disable on success
+                          });
+                        },
+                        child: const Text("Apply"),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+                  if (_couponMsg.isNotEmpty)
+                    Text(
+                      _couponMsg,
+                      style: TextStyle(
+                        color: _couponApplied ? Colors.green : Colors.red,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+
+                  const SizedBox(height: 8),
+                  _infoRow('Amount to Pay:', '$_payableInr INR'),
+                ],
               ),
-              const SizedBox(height: 8),
-              _infoRow('Amount to Pay:', '$_payableInr INR'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('CANCEL'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF692C5A),
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _lastMachine = machine;
-                _lastWallet = wallet;
-                if (enoughCoins) {
-                  _goToPayment(machine, wallet);
-                } else {
-                  _startRazorpayPayment(_payableInr);
-                }
-              },
-              child: Text(btnLabel),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('CANCEL'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF692C5A),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    _lastMachine = machine;
+                    _lastWallet = wallet;
+                    if (enoughCoins) {
+                      _goToPayment(machine, wallet);
+                    } else {
+                      _startRazorpayPayment(_payableInr);
+                    }
+                  },
+                  child: Text(enoughCoins ? 'Proceed with Deduction' : 'Proceed to Payment'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
+
+
+
+
+  Future<void> _applyCoupon(
+      String code,
+      void Function(void Function()) setDialogState,
+      VoidCallback onSuccessDisable,
+      ) async {
+    if (_franchiseId == null) {
+      _showSnack("Franchise info missing");
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) {
+      _showSnack("Please log in again");
+      return;
+    }
+
+    try {
+      final resp = await http.post(
+        Uri.parse('https://api.coinlaundryindia.com/promocode'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          "coupon": code,
+          "franchiseId": _franchiseId,
+        }),
+      );
+
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body);
+        final discount = (data['coins'] ?? 0).toInt();
+
+        setDialogState(() {
+          _discountInr = discount;
+          _couponApplied = true;
+          _payableInr = max(0, _payableInr - discount) as int;
+          _couponMsg = "Coupon applied successfully (-₹$discount)";
+        });
+
+        onSuccessDisable(); // ✅ disable Apply button after success
+      } else {
+        setDialogState(() {
+          _couponApplied = false;
+          _couponMsg = "Invalid or expired coupon.";
+        });
+      }
+    } catch (e) {
+      setDialogState(() {
+        _couponApplied = false;
+        _couponMsg = "Failed to apply coupon. Try again.";
+      });
+    }
+  }
+
+
+
+
+
+
 
   @override
   Widget build(BuildContext context) {

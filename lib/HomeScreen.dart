@@ -62,7 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
         userId = data['id'];
         userName = "${data['firstName']} ${data['lastName']}";
         coinBalance = data['coinBalance'] ?? 0;
-        await fetchOrders(userId!, token);
+        await fetchOrders(userId!, token,"Self");
       } else if (response.statusCode == 401) {
         await handleTokenExpired();
       } else {
@@ -77,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> fetchOrders(int id, String token) async {
+  Future<void> fetchOrders(int id, String token,String type) async {
     try {
       final response = await http.get(
         Uri.parse('https://api.coinlaundryindia.com/users/$id/orders'),
@@ -87,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          orders = List.from(data.reversed);;
+          orders = List.from(data.reversed);
         });
       } else if (response.statusCode == 401) {
         await handleTokenExpired();
@@ -247,11 +247,27 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const QRScannerScreen(orderType: 'self')),
-                    );
+                    // Navigator.push(
+                    //   context,
+                    //   MaterialPageRoute(builder: (context) => const QRScannerScreen(orderType: 'self')),
+                    // );
+                    onPressed: () async {
+                      setState(() => isLoading = true);
+
+                      final prefs = await SharedPreferences.getInstance();
+                      final token = prefs.getString('auth_token');
+
+                      if (userId != null && token != null) {
+                        await fetchOrders(userId!, token,"self");
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('User not logged in')),
+                        );
+                      }
+
+                      setState(() => isLoading = false);
+
+
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
@@ -266,11 +282,25 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(width: 16),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const QRScannerScreen(orderType: 'dropoff')),
-                    );
+                  // onPressed: () {
+                    // Navigator.push(
+                    //   context,
+                    //   MaterialPageRoute(builder: (context) => const QRScannerScreen(orderType: 'dropoff')),
+                    // );
+                  onPressed: () async {
+                    setState(() => isLoading = true);
+
+                    final prefs = await SharedPreferences.getInstance();
+                    final token = prefs.getString('auth_token');
+
+                    if (userId != null && token != null) {
+                    await fetchOrders(userId!, token,"drop");
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('User not logged in')),
+                      );
+                    }
+                    setState(() => isLoading = false);
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
