@@ -67,9 +67,9 @@ PODS:
     - FlutterMacOS
   - permission_handler_apple (9.3.0):
     - Flutter
-  - PromisesObjC (2.4.0)
-  - Protobuf (3.29.5)
-  - razorpay-pod (1.4.3)
+  - PromisesObjC (2.4.1)
+  - Protobuf (3.29.6)
+  - razorpay-pod (1.5.4)
   - razorpay_flutter (1.1.10):
     - Flutter
     - razorpay-pod
@@ -83,7 +83,7 @@ PODS:
   - shared_preferences_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
-  - SwiftProtobuf (1.30.0)
+  - SwiftProtobuf (1.38.0)
   - url_launcher_ios (0.0.1):
     - Flutter
 
@@ -140,7 +140,7 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/url_launcher_ios/ios"
 
 SPEC CHECKSUMS:
-  Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   fluttertoast: 2c67e14dce98bbdb200df9e1acf610d7a6264ea1
   GoogleDataTransport: 6c09b596d841063d76d4288cc2d2f42cc36e1e2a
   GoogleMLKit: 2bd0dc6253c4d4f227aad460f69215a504b2980e
@@ -156,16 +156,16 @@ SPEC CHECKSUMS:
   nanopb: 438bc412db1928dac798aa6fd75726007be04262
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
-  PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
-  Protobuf: 164aea2ae380c3951abdc3e195220c01d17400e0
-  razorpay-pod: af9d52abe715ed5cc3eed9fdf6fd74340443d0b9
+  PromisesObjC: 752c3227f599e3467650e47ea36f433eeb10c273
+  Protobuf: 8d5596f7468be5400861a6bbfb2dfe9d0d1cde34
+  razorpay-pod: 3ba80419f3315352d6ffa336a194ad95ab249700
   razorpay_flutter: 0e98e4fcaae27ad50e011d85f66d85e0a008754a
   reactive_ble_mobile: ea97709e18fa6f0b0592909725d7ae7e1c595b64
   share_plus: de6030e33b4e106470e09322d87cf2a4258d2d1d
   shared_preferences_foundation: 9e1978ff2562383bd5676f64ec4e9aa8fa06a6f7
-  SwiftProtobuf: 3697407f0d5b23bedeba9c2eaaf3ec6fdff69349
+  SwiftProtobuf: d724b5145bfc609d9a49c1e3e3a3dabb07273ffb
   url_launcher_ios: 694010445543906933d732453a59da0a173ae33d
 
-PODFILE CHECKSUM: 2bbf19fee23fd88380b39ef3641767ee103e5caa
+PODFILE CHECKSUM: e8403fff80e6608c99820345085dd065094fa433
 
 COCOAPODS: 1.16.2

@@ -27,7 +27,7 @@ class OrderHistoryScreen extends StatelessWidget {
             icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const QRScannerScreen(orderType: 'self')),
+              MaterialPageRoute(builder: (context) =>  QRScannerScreen(orderType: 'self')),
             ),
           ),
         ),

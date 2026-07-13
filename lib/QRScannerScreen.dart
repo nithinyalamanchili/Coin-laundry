@@ -1,5 +1,7 @@
+// QRScannerScreen.dart — Optimized, validation injected (Option D)
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -9,32 +11,34 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:permission_handler/permission_handler.dart';
+
 import 'WelcomeScreen.dart';
 import 'HomeScreen.dart';
 import 'bottom_nav.dart';
-import 'dart:math';
-
-
-import 'PaymentScreen.dart';
 
 class QRScannerScreen extends StatefulWidget {
   final String orderType;
 
-  const QRScannerScreen({super.key, required this.orderType});
+
+
+
+  QRScannerScreen({super.key, required this.orderType});
 
   @override
   State<QRScannerScreen> createState() => _QRScannerScreenState();
 }
 
 class _QRScannerScreenState extends State<QRScannerScreen> {
+  BleStatus _bleStatus = BleStatus.unknown;
+  StreamSubscription<BleStatus>? _bleStatusSub;
   bool isScanning = true;
   bool _loading = false;
   bool _connecting = false;
-
-
+  String? _selectedOrderType; // values: "self" or "dropoff"
 
   final TextEditingController machineIdController = TextEditingController();
   final TextEditingController _couponCtrl = TextEditingController();
+
   final MobileScannerController _scannerController = MobileScannerController();
   late Razorpay _razorpay;
 
@@ -45,6 +49,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   int _payableInr = 0;
   Map<String, dynamic>? _lastMachine;
   Map<String, dynamic>? _lastWallet;
+
   int? _userId;
   int? _franchiseId;
   int? _orderId;
@@ -53,14 +58,92 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   bool _couponApplied = false;
   String _couponMsg = "";
 
+  // Debounce for scans
+  Timer? _scanDebounce;
 
   @override
   void initState() {
     super.initState();
+    _bleStatusSub = _ble.statusStream.listen((status) {
+      if (mounted) {
+        setState(() {
+          _bleStatus = status;
+        });
+      }
+    });
+    // Show existing popup you had in file
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showOrderTypeSelection();
+    });
+
     _razorpay = Razorpay()
       ..on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaySuccess)
       ..on(Razorpay.EVENT_PAYMENT_ERROR, _onPayError)
       ..on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+  }
+
+  Future<bool> _ensureBluetoothAndLocationOn() async {
+    // 1. Check and request permissions if missing
+    if (_bleStatus == BleStatus.unauthorized) {
+      await [
+        Permission.location,
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+      ].request();
+      // Give a brief moment for the BLE status stream to update
+      await Future.delayed(const Duration(milliseconds: 800));
+    }
+
+    if (_bleStatus == BleStatus.ready) {
+      return true;
+    }
+
+    // 2. Determine the specific issue if still not ready
+    String title = "Hardware Required";
+    String content = "Please ensure Bluetooth and Location (GPS) are turned ON to connect to the machine.";
+    String actionLabel = "Retry";
+
+    if (_bleStatus == BleStatus.poweredOff) {
+      title = "Bluetooth Required";
+      content = "Bluetooth is OFF. Please enable Bluetooth to start the machine.";
+    } else if (_bleStatus == BleStatus.locationServicesDisabled) {
+      title = "Location Required";
+      content = "Location services (GPS) are OFF. Android requires Location to be ON for Bluetooth scanning.";
+    } else if (_bleStatus == BleStatus.unauthorized) {
+      title = "Permission Required";
+      content = "Bluetooth or Location permissions were denied. Please grant them in App Settings.";
+      actionLabel = "Open Settings";
+    }
+
+    bool? result = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () async {
+              if (_bleStatus == BleStatus.unauthorized) {
+                await openAppSettings();
+              }
+              Navigator.pop(context, true);
+            },
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      // If user clicked Retry/Open Settings, check again recursively
+      return await _ensureBluetoothAndLocationOn();
+    }
+
+    return _bleStatus == BleStatus.ready;
   }
 
   @override
@@ -71,9 +154,52 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     _razorpay.clear();
     _bleScanSub?.cancel();
     _connectionSub?.cancel();
+    _scanDebounce?.cancel();
+    _bleStatusSub?.cancel();
     super.dispose();
   }
 
+  // ---------------------------
+  // Order Type Popup (kept as-is)
+  // ---------------------------
+  void _showOrderTypeSelection() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text("Choose Order Type"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildOrderTypeButton("Self Operated", "self"),
+              const SizedBox(height: 12),
+              _buildOrderTypeButton("Drop-off", "dropoff"),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildOrderTypeButton(String title, String type) {
+    return ElevatedButton(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF692C5A),
+        foregroundColor: Colors.white,
+        minimumSize: const Size(double.infinity, 48),
+      ),
+      onPressed: () {
+        setState(() => _selectedOrderType = type);
+        Navigator.of(context).pop();
+      },
+      child: Text(title),
+    );
+  }
+
+  // ---------------------------
+  // Razorpay callbacks
+  // ---------------------------
   Future<void> _showPaymentSuccessDialog(BuildContext context) async {
     await showDialog(
       context: context,
@@ -87,7 +213,6 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // ✅ Circle with tick animation
                 TweenAnimationBuilder<double>(
                   tween: Tween(begin: 0.0, end: 1.0),
                   duration: const Duration(milliseconds: 800),
@@ -102,12 +227,8 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                           border: Border.all(color: Colors.green, width: 4),
                           color: Colors.green.withOpacity(0.1),
                         ),
-                        child: Center(
-                          child: Icon(
-                            Icons.check,
-                            color: Colors.green,
-                            size: 60,
-                          ),
+                        child: const Center(
+                          child: Icon(Icons.check, color: Colors.green, size: 60),
                         ),
                       ),
                     );
@@ -128,9 +249,6 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                     backgroundColor: const Color(0xFF692C5A),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
                   ),
                   onPressed: () => Navigator.of(context).pop(),
                   child: const Text("Continue"),
@@ -143,12 +261,8 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     );
   }
 
-
-
-
   void _onPaySuccess(PaymentSuccessResponse response) async {
-    await _showPaymentSuccessDialog(context); // 🎉 Show animated success popup
-
+    await _showPaymentSuccessDialog(context);
     if (_lastMachine != null && _lastWallet != null) {
       _goToPayment(_lastMachine!, _lastWallet!);
     }
@@ -171,8 +285,8 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
       'name': 'Coin Laundry',
       'description': 'Machine usage charge',
       'theme': {'color': '#692C5A'},
+      'payment_capture': 1,
     };
-
     try {
       _razorpay.open(options);
     } catch (e) {
@@ -180,36 +294,76 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     }
   }
 
+  // ---------------------------
+  // QR scan handler (debounced)
+  // ---------------------------
   void _onQRCodeScanned(String code) async {
     if (!isScanning) return;
+
+    // require user to choose order type
+    if (_selectedOrderType == null) {
+      _showSnack("Please select order type");
+      _showOrderTypeSelection();
+      return;
+    }
+
+    // debounce to avoid multiple rapid calls
+    _scanDebounce?.cancel();
+    _scanDebounce = Timer(const Duration(milliseconds: 500), () {
+      _handleScannedCode(code);
+    });
+  }
+
+  Future<void> _handleScannedCode(String code) async {
+    if (!mounted) return;
     setState(() => isScanning = false);
+
     await fetchMachineAndWalletDetails(code);
+
     if (mounted) setState(() => isScanning = true);
   }
 
+  // ---------------------------
+  // Manual machine ID submission
+  // ---------------------------
   void _onMachineIdSubmitted() async {
+    if (_selectedOrderType == null) {
+      _showSnack("Please select order type first");
+      _showOrderTypeSelection();
+      return;
+    }
+
     final machineId = machineIdController.text.trim();
     if (machineId.isEmpty) {
       _showSnack("Please enter a valid Machine ID");
       return;
     }
+    setState(() => _loading = true);
     await fetchMachineAndWalletDetails(machineId);
+    if (mounted) setState(() => _loading = false);
   }
 
+  // ---------------------------
+  // Fetch machine + wallet and VALIDATE against _selectedOrderType
+  // ---------------------------
   Future<void> fetchMachineAndWalletDetails(String machineId) async {
     setState(() => _loading = true);
+
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
+
     if (token == null) {
       _showSnack("Authentication token missing");
       setState(() => _loading = false);
       return;
     }
 
-    final headers = {'Authorization': 'Bearer $token'};
     try {
+      final headers = {"Authorization": "Bearer $token"};
+
+      // fetch user
       final userResp = await http.get(
-        Uri.parse('https://api.coinlaundryindia.com/users/me'),
+        Uri.parse("https://api.coinlaundryindia.com/users/me"),
         headers: headers,
       );
 
@@ -218,42 +372,46 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
         return;
       }
 
-      if (userResp.statusCode != 200) {
-        _showSnack("Failed to fetch user details");
-        return;
-      }
+      final userJson = json.decode(userResp.body);
+      _userId = userJson['id'];
 
-      _userId = json.decode(userResp.body)['id'];
+      // fetch machine and wallet in parallel
+      final machineFuture = http.get(
+        Uri.parse("https://api.coinlaundryindia.com/machines/$machineId"),
+        headers: headers,
+      );
+      final walletFuture = http.get(
+        Uri.parse("https://api.coinlaundryindia.com/users/$_userId/wallets"),
+        headers: headers,
+      );
 
-      final machineUri = Uri.parse('https://api.coinlaundryindia.com/machines/$machineId');
-      final walletUri = Uri.parse('https://api.coinlaundryindia.com/users/$_userId/wallets');
+      final responses = await Future.wait([machineFuture, walletFuture]);
+      final machineResp = responses[0];
+      final walletResp = responses[1];
 
-      final responses = await Future.wait([
-        http.get(machineUri, headers: headers),
-        http.get(walletUri, headers: headers),
-      ]);
-
-      if (responses[0].statusCode == 401 || responses[1].statusCode == 401) {
-        await _handleTokenExpired();
-        return;
-      }
-
-      if (responses[0].statusCode != 200) {
+      if (machineResp.statusCode != 200) {
         _showSnack("Machine not found");
         return;
       }
-      if (responses[1].statusCode != 200) {
+      if (walletResp.statusCode != 200) {
         _showSnack("Failed to fetch wallet");
         return;
       }
 
-      final machine = json.decode(responses[0].body);
-      final wallet = json.decode(responses[1].body);
+      final machineJson = json.decode(machineResp.body);
+      final walletJson = json.decode(walletResp.body);
 
-      final m = machine is List ? machine.first : machine;
-      final w = wallet is List ? wallet.first : wallet;
+      final m = machineJson is List ? machineJson.first : machineJson;
+      final w = walletJson is List ? walletJson.first : walletJson;
 
-      _franchiseId = m['franchiseId'] as int?;
+      _franchiseId = m['franchiseId'];
+
+      // Validate machine operation type matches user selection
+      if (!matchesSelection(m['operationType']?.toString() ?? "", _selectedOrderType!)) {
+        await _showMismatchDialog(m, _selectedOrderType!);
+        return;
+      }
+
       if (mounted) _showMachineWalletPopup(m, w);
     } catch (e) {
       _showSnack("Something went wrong");
@@ -262,22 +420,72 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     }
   }
 
-  Future<void> _handleTokenExpired() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('auth_token');
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Session expired. Please log in again')),
-    );
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const WelcomeScreen(name: "")),
+  // tolerant matching: handles "drop offf", spaces, hyphens etc.
+  bool matchesSelection(String machineOp, String selected) {
+    final m = machineOp.toLowerCase();
+    if (selected == "self") {
+      return m.contains("self");
+    } else if (selected == "dropoff" || selected == "drop-off") {
+      return m.contains("drop");
+    }
+    // fallback: try normalized equality
+    String normalize(String s) => s.toLowerCase().replaceAll(RegExp(r'[\s\-]'), '');
+    return normalize(m) == normalize(selected);
+  }
+
+  Future<void> _showMismatchDialog(Map<String, dynamic> machine, String selected) async {
+    final op = machine['operationType'] ?? 'Unknown';
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Invalid Selection"),
+        content: Text(
+          "The machine is configured as '$op'.\nYou selected '${selected == 'self' ? 'Self Operated' : 'Drop-off'}'.\nPlease choose the correct option.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              // reopen selection for convenience
+              _showOrderTypeSelection();
+            },
+            child: const Text("Change Selection"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text("Cancel"),
+          ),
+        ],
+      ),
     );
   }
 
-  void _showSnack(String msg) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  // ---------------------------
+  // Token expired
+  // ---------------------------
+  Future<void> _handleTokenExpired() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
 
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Session expired. Please login again")),
+    );
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const WelcomeScreen(name: "")),
+    );
+  }
+
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ---------------------------
+  // Create self order
+  // ---------------------------
   Future<int?> _createSelfOrder({
     required Map<String, dynamic> machine,
     required int walletDeduct,
@@ -285,15 +493,17 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
+
     if (token == null) return null;
 
     final headers = {
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json',
+      "Authorization": "Bearer $token",
+      "Content-Type": "application/json",
     };
 
-    final nowIso =
-        DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(DateTime.now().toUtc());
+    final nowIso = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+        .format(DateTime.now().toUtc());
+
     final endIso = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
         .format(DateTime.now().toUtc().add(const Duration(minutes: 30)));
 
@@ -315,135 +525,233 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
       "transactionId": "promocode",
       "userId": _userId,
       "walletDeductions": walletDeduct,
-      "weight": 0
+      "weight": 0,
     });
 
-    final uri =
-        Uri.parse('https://api.coinlaundryindia.com/users/$_userId/orders');
-    final resp = await http.post(uri, headers: headers, body: body);
+    final resp = await http.post(
+      Uri.parse("https://api.coinlaundryindia.com/users/$_userId/orders"),
+      headers: headers,
+      body: body,
+    );
+
     if (resp.statusCode != 200) return null;
 
-    final order = json.decode(resp.body);
-    return order['order']['id'] as int?;
+    final jsonResp = json.decode(resp.body);
+    return jsonResp['order']?['id'];
   }
 
+
+  Future<int?> _createDropoffOrder({
+    required Map<String, dynamic> machine,
+    required int walletDeduct,
+    required int promoDeduct,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+
+    if (token == null) return null;
+
+    final headers = {
+      "Authorization": "Bearer $token",
+      "Content-Type": "application/json",
+    };
+
+    final nowIso = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+        .format(DateTime.now().toUtc());
+
+    final endIso = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+        .format(DateTime.now().toUtc().add(const Duration(minutes: 30)));
+
+    final body = json.encode({
+      "amount": _payableInr,
+      "btTrigger": false,
+      "endTime": endIso,
+      "feedback": "",
+      "franchiseId": _franchiseId,
+      "machineId": machine['id'],
+      "opertationType": "drop off",
+      "orderStatus": "ongoing",
+      "paymentStatus": "paid",
+      "promoCode": "",
+      "promoDeductions": promoDeduct,
+      "rewardAmount": 0,
+      "startTime": nowIso,
+      "transactionAmount": 0,
+      "transactionId": "promocode",
+      "userId": _userId,
+      "walletDeductions": walletDeduct,
+      "weight": 0,
+    });
+
+    final resp = await http.post(
+      Uri.parse("https://api.coinlaundryindia.com/users/$_userId/orders"),
+      headers: headers,
+      body: body,
+    );
+    if (resp.statusCode != 200) return null;
+
+    final jsonResp = json.decode(resp.body);
+    print("@@@@@@@@@@@@ $jsonResp");
+    return jsonResp['order']?['id'];
+  }
+
+  // ---------------------------
+  // Payment + BLE trigger flow
+  // ---------------------------
   void _goToPayment(Map<String, dynamic> machine, Map<String, dynamic> wallet) async {
     if (_userId == null) {
-      _showSnack('User info missing – please re‑scan.');
+      _showSnack("User info missing — please re-scan.");
       return;
     }
 
     bool ok = false;
 
-    if (widget.orderType == 'self') {
+    if (_selectedOrderType == "self") {
+
+      /// CHECK BLUETOOTH & LOCATION BEFORE ORDER CREATION
+      final hardwareReady = await _ensureBluetoothAndLocationOn();
+
+      if (!hardwareReady) {
+        return; // Message already shown in dialog
+      }
+
       final walletBal = (wallet['balance'] ?? 0).toInt();
       final charges = (machine['charges'] ?? 0).toInt();
+
       final walletDeduct = walletBal >= charges ? charges : walletBal;
-      final promoDeduct = _couponCtrl.text.trim().isEmpty ? 0 : 1;
+      final promoDeduct = _couponApplied ? _discountInr : 0;
 
       _orderId = await _createSelfOrder(
         machine: machine,
         walletDeduct: walletDeduct,
         promoDeduct: promoDeduct,
       );
+
+      ok = _orderId != null;
+    }else if (_selectedOrderType == "dropoff") {
+      // Drop-off flow (existing)
+      final walletBal = (wallet['balance'] ?? 0).toInt();
+      final charges = (machine['charges'] ?? 0).toInt();
+
+      final walletDeduct = walletBal >= charges ? charges : walletBal;
+      final promoDeduct = _couponApplied ? _discountInr : 0;
+
+      _orderId = await _createDropoffOrder(
+        machine: machine,
+        walletDeduct: walletDeduct,
+        promoDeduct: promoDeduct,
+      );
+
       ok = _orderId != null;
     }
 
     if (!ok) {
-      _showSnack('Could not create order – try again.');
+      _showSnack("Could not create order. Try again.");
       return;
     }
 
-    _startBLEScan(machine['id']);
-  }
+    // Only attempt BLE for self-operated machines
+    if (_selectedOrderType == "self") {
 
-  Future<void> _markOrderTriggered(int orderId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) {
-      await _handleTokenExpired();
-      return;
-    }
+      final hardwareReady = await _ensureBluetoothAndLocationOn();
 
-    final headers = {
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json',
-    };
-
-    final body = json.encode({'id': orderId, 'btTrigger': true});
-
-    try {
-      final response = await http.patch(
-        Uri.parse('https://api.coinlaundryindia.com/users/$_userId/orders'),
-        headers: headers,
-        body: body,
-      );
-      if (response.statusCode == 200) {
-        // ✅ Machine started, redirect to welcome screen
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const HomeScreen()),
-          );
-
-        }
-      } else if (response.statusCode == 401) {
-        await _handleTokenExpired();
-      } else {
-        _showSnack("Failed to update order status");
+      if (!hardwareReady) {
+        return;
       }
-    } catch (e) {
-      print('btTrigger patch failed: $e');
-      _showSnack("Error updating order");
+
+      _startBLEScan(machine['id']);
+
+
+    } else {
+      // For drop-off proceed to appropriate screen (keeps existing behaviour)
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
     }
   }
-
 
   Future<void> _startBLEScan(int machineId) async {
     if (_connecting) return;
+
     setState(() => _connecting = true);
 
-    await [
+    final perms = await [
       Permission.location,
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
     ].request();
 
+    if (perms[Permission.location] != PermissionStatus.granted ||
+        perms[Permission.bluetoothScan] != PermissionStatus.granted ||
+        perms[Permission.bluetoothConnect] != PermissionStatus.granted) {
+      _showSnack("Hardware permissions not granted");
+      setState(() => _connecting = false);
+      return;
+    }
+
+    bool deviceFound = false;
+
     _bleScanSub?.cancel();
-    _bleScanSub = _ble.scanForDevices(withServices: [], scanMode: ScanMode.lowLatency).listen(
-      (device) async {
-        if (device.name == 'Coin_Laundry_Machine_$machineId') {
-          _bleScanSub?.cancel();
-          await _connectToDevice(device);
+
+    _bleScanSub = _ble
+        .scanForDevices(withServices: [], scanMode: ScanMode.lowLatency)
+        .listen((device) async {
+
+      // Flexible name matching to handle variations in BLE reporting
+      if (device.name.trim().contains("Coin_Laundry_Machine_$machineId")) {
+        deviceFound = true;
+
+        _bleScanSub?.cancel();
+
+        await _connectToDevice(device);
+      }
+
+    }, onError: (e) {
+      _showSnack("BLE Scan failed");
+      setState(() => _connecting = false);
+    });
+
+    /// BLE SCAN TIMEOUT (Increased to 10s for better compatibility)
+    Future.delayed(const Duration(seconds: 10), () {
+      if (!deviceFound) {
+        _bleScanSub?.cancel();
+
+        if (mounted) {
+          setState(() => _connecting = false);
+
+          _showSnack("Machine not detected. Please ensure you are near the machine.");
+
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
+          );
         }
-      },
-      onError: (err) {
-        _showSnack('BLE Scan failed: $err');
-        setState(() => _connecting = false);
-      },
-    );
+      }
+    });
   }
 
   Future<void> _connectToDevice(DiscoveredDevice device) async {
     _connectionSub?.cancel();
+
     _connectionSub = _ble.connectToDevice(id: device.id).listen((update) async {
       if (update.connectionState == DeviceConnectionState.connected) {
-        _showSnack('BLE Connected.');
+        _showSnack("BLE Connected.");
         await _discoverAndTrigger(device.id);
       } else if (update.connectionState == DeviceConnectionState.disconnected) {
-        _showSnack('BLE Disconnected.');
+        _showSnack("BLE Disconnected.");
         setState(() => _connecting = false);
       }
     }, onError: (e) {
-      _showSnack('BLE Connection failed: $e');
+      _showSnack("BLE Connection failed: $e");
       setState(() => _connecting = false);
     });
   }
 
   Future<void> _discoverAndTrigger(String deviceId) async {
     try {
-      final serviceId = Uuid.parse('858d4d61-ec4f-433a-9022-02e7f3d66ff5');
-      final charId = Uuid.parse('51fe2520-5bfb-496d-bbb5-b7326c634f41');
+      final serviceId = Uuid.parse("858d4d61-ec4f-433a-9022-02e7f3d66ff5");
+      final charId = Uuid.parse("51fe2520-5bfb-496d-bbb5-b7326c634f41");
 
       final char = QualifiedCharacteristic(
         serviceId: serviceId,
@@ -462,8 +770,6 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
       if (value == "coin2020laundry") {
         if (_orderId != null) {
           await _markOrderTriggered(_orderId!);
-          _showSnack("Machine started & order updated.");
-
         }
       } else {
         _showSnack("BLE write/read mismatch.");
@@ -475,56 +781,71 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     }
   }
 
+  Future<void> _markOrderTriggered(int orderId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
 
+    if (token == null) {
+      await _handleTokenExpired();
+      return;
+    }
 
-  Widget _infoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(child: Text(label, style: const TextStyle(color: Color(0xFF692C5A)))),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
-        ],
-      ),
+    final resp = await http.patch(
+      Uri.parse("https://api.coinlaundryindia.com/users/$_userId/orders"),
+      headers: {
+        "Authorization": "Bearer $token",
+        "Content-Type": "application/json",
+      },
+      body: json.encode({"id": orderId, "btTrigger": true}),
     );
+
+    if (resp.statusCode == 200) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
+    } else {
+      _showSnack("Failed to update order status");
+    }
   }
 
+  // ---------------------------
+  // Machine + wallet confirmation dialog
+  // ---------------------------
   void _showMachineWalletPopup(Map<String, dynamic> machine, Map<String, dynamic> wallet) {
     final charges = (machine['charges'] ?? 0).toInt();
     final walletBal = (wallet['balance'] ?? 0).toInt();
-    final walletDeduct = charges > walletBal ? walletBal : charges;
-    _payableInr = charges - walletDeduct;
 
+    final walletDeduct = walletBal >= charges ? charges : walletBal;
+    _payableInr = charges - walletDeduct;
     final enoughCoins = _payableInr == 0;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        bool applyDisabled = false; // 🔹 local state for Apply button
+        bool applyDisabled = false;
 
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text('Confirm Order'),
+              title: const Text("Confirm Order"),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _infoRow('Wallet Balance:', '$walletBal coin'),
-                  _infoRow('Charges:', '$charges INR'),
-                  _infoRow('Wallet Deductions:', '$walletDeduct coin'),
-                  _infoRow('Coupon Discount:', _couponApplied ? '-$_discountInr INR' : '0 INR'),
+                  _infoRow("Wallet Balance:", "$walletBal coin"),
+                  _infoRow("Charges:", "$charges INR"),
+                  _infoRow("Wallet Deductions:", "$walletDeduct coin"),
+                  _infoRow("Coupon Discount:", _couponApplied ? "-$_discountInr INR" : "0 INR"),
                   const SizedBox(height: 8),
-
-                  // 🧾 Coupon input + Apply button
                   Row(
                     children: [
                       Expanded(
                         child: TextField(
                           controller: _couponCtrl,
-                          enabled: !applyDisabled, // 🔹 disable input if applied
+                          enabled: !applyDisabled,
                           decoration: const InputDecoration(
-                            hintText: 'Enter Coupon Code',
+                            hintText: "Enter Coupon Code",
                             border: OutlineInputBorder(),
                             contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           ),
@@ -537,22 +858,22 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                           foregroundColor: Colors.white,
                         ),
                         onPressed: applyDisabled
-                            ? null // 🔹 disable after success
+                            ? null
                             : () async {
                           final code = _couponCtrl.text.trim();
                           if (code.isEmpty) {
-                            _showSnack("Please enter a coupon code");
+                            _showSnack("Enter coupon code");
                             return;
                           }
+
                           await _applyCoupon(code, setDialogState, () {
-                            setDialogState(() => applyDisabled = true); // ✅ disable on success
+                            setDialogState(() => applyDisabled = true);
                           });
                         },
                         child: const Text("Apply"),
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 8),
                   if (_couponMsg.isNotEmpty)
                     Text(
@@ -562,15 +883,14 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-
                   const SizedBox(height: 8),
-                  _infoRow('Amount to Pay:', '$_payableInr INR'),
+                  _infoRow("Amount to Pay:", "$_payableInr INR"),
                 ],
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('CANCEL'),
+                  child: const Text("CANCEL"),
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
@@ -581,13 +901,14 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                     Navigator.of(ctx).pop();
                     _lastMachine = machine;
                     _lastWallet = wallet;
+
                     if (enoughCoins) {
                       _goToPayment(machine, wallet);
                     } else {
                       _startRazorpayPayment(_payableInr);
                     }
                   },
-                  child: Text(enoughCoins ? 'Proceed with Deduction' : 'Proceed to Payment'),
+                  child: Text(enoughCoins ? "Proceed with Deduction" : "Proceed to Payment"),
                 ),
               ],
             );
@@ -596,9 +917,6 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
       },
     );
   }
-
-
-
 
   Future<void> _applyCoupon(
       String code,
@@ -611,7 +929,8 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
+    final token = prefs.getString("auth_token");
+
     if (token == null) {
       _showSnack("Please log in again");
       return;
@@ -619,15 +938,12 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
 
     try {
       final resp = await http.post(
-        Uri.parse('https://api.coinlaundryindia.com/promocode'),
+        Uri.parse("https://api.coinlaundryindia.com/promocode"),
         headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
+          "Authorization": "Bearer $token",
+          "Content-Type": "application/json",
         },
-        body: json.encode({
-          "coupon": code,
-          "franchiseId": _franchiseId,
-        }),
+        body: json.encode({"coupon": code, "franchiseId": _franchiseId}),
       );
 
       if (resp.statusCode == 200) {
@@ -635,13 +951,13 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
         final discount = (data['coins'] ?? 0).toInt();
 
         setDialogState(() {
-          _discountInr = discount;
           _couponApplied = true;
-          _payableInr = max(0, _payableInr - discount) as int;
+          _discountInr = discount;
+          _payableInr = max(0, _payableInr - discount).toInt();
           _couponMsg = "Coupon applied successfully (-₹$discount)";
         });
 
-        onSuccessDisable(); // ✅ disable Apply button after success
+        onSuccessDisable();
       } else {
         setDialogState(() {
           _couponApplied = false;
@@ -656,40 +972,46 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     }
   }
 
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(label, style: const TextStyle(color: Color(0xFF692C5A))),
+          ),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
 
-
-
-
-
-
+  // ---------------------------
+  // UI Build
+  // ---------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey.shade300,
-
-      // 🧭 Add bottom navigation bar
       bottomNavigationBar: const BottomNav(currentIndex: 2),
-
       body: SafeArea(
         child: Stack(
           children: [
-            // 📷 Camera Preview
             Column(
               children: [
                 Expanded(
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Scanner view
                       MobileScanner(
                         controller: _scannerController,
                         onDetect: (capture) {
                           final val = capture.barcodes.first.rawValue;
-                          if (val != null && isScanning) _onQRCodeScanned(val);
+                          if (val != null && isScanning) {
+                            _onQRCodeScanned(val);
+                          }
                         },
                       ),
-
-                      // 🟩 Animated Scan Box
                       Center(
                         child: SizedBox(
                           width: 250,
@@ -700,8 +1022,6 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                     ],
                   ),
                 ),
-
-                // 🧾 Instructions + Manual Entry
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -722,10 +1042,11 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                             child: TextField(
                               controller: machineIdController,
                               decoration: InputDecoration(
-                                hintText: 'Machine-Id',
+                                hintText: "Machine-ID",
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               ),
                             ),
                           ),
@@ -745,12 +1066,10 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                 ),
               ],
             ),
-
-            // ⏳ Loader Overlay
-            if (_loading)
+            if (_loading || _connecting)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black38,
+                  color: Colors.black26,
                   child: const Center(child: CircularProgressIndicator()),
                 ),
               ),
@@ -759,10 +1078,11 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
       ),
     );
   }
-
-
 }
 
+// ---------------------------
+// Animated scanner box (kept and slightly simplified)
+// ---------------------------
 class _AnimatedScannerBox extends StatefulWidget {
   @override
   State<_AnimatedScannerBox> createState() => _AnimatedScannerBoxState();
@@ -775,10 +1095,11 @@ class _AnimatedScannerBoxState extends State<_AnimatedScannerBox>
   @override
   void initState() {
     super.initState();
+
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
-    )..repeat(reverse: true); // keeps moving up & down forever
+    )..repeat(reverse: true);
   }
 
   @override
@@ -792,7 +1113,6 @@ class _AnimatedScannerBoxState extends State<_AnimatedScannerBox>
     return Stack(
       alignment: Alignment.topCenter,
       children: [
-        // Black bordered box
         Container(
           width: 250,
           height: 250,
@@ -801,11 +1121,9 @@ class _AnimatedScannerBoxState extends State<_AnimatedScannerBox>
             borderRadius: BorderRadius.circular(8),
           ),
         ),
-
-        // Moving red line
         AnimatedBuilder(
           animation: _controller,
-          builder: (context, child) {
+          builder: (_, __) {
             return Positioned(
               top: _controller.value * 250,
               child: Container(
@@ -828,6 +1146,4 @@ class _AnimatedScannerBoxState extends State<_AnimatedScannerBox>
       ],
     );
   }
-
 }
-

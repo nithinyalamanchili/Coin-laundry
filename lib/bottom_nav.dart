@@ -63,7 +63,7 @@ class _BottomNavState extends State<BottomNav> {
         } else if (index == 2) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => const QRScannerScreen(orderType: 'self')),
+            MaterialPageRoute(builder: (_) =>  QRScannerScreen(orderType: 'self')),
           );
         } else if (index == 3 && token != null) {
           final response = await http.get(

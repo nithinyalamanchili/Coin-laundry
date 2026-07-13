@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'bottom_nav.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AllOrdersScreen extends StatelessWidget {
   final List<dynamic> orders;
@@ -11,6 +14,87 @@ class AllOrdersScreen extends StatelessWidget {
     final dt = DateTime.parse(isoDate);
     return DateFormat('hh:mm a, dd MMM yyyy').format(dt);
   }
+
+  void showRechargePopup(BuildContext context) {
+    TextEditingController codeController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Recharge Wallet"),
+          content: TextField(
+            controller: codeController,
+            decoration: const InputDecoration(
+              labelText: "Enter Coupon Code",
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                String code = codeController.text.trim();
+
+                if (code.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Please enter coupon code")),
+                  );
+                  return;
+                }
+
+                await rechargeWallet(context, code);
+                Navigator.pop(context);
+              },
+              child: const Text("Submit"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> rechargeWallet(BuildContext context, String code) async {
+    try {
+
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+
+
+      final response = await http.post(
+        Uri.parse("https://api.coinlaundryindia.com/recharge-wallets"),
+        headers: {'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $token'},
+        body: jsonEncode({
+          "couponCode": code,
+        }),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        print(data);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data["message"] ?? "Recharge Successful")),
+        );
+      } else {
+        print(data);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data["message"] ?? "Recharge Failed")),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Something went wrong")),
+      );
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +140,9 @@ class AllOrdersScreen extends StatelessWidget {
                           foregroundColor: Colors.black,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
-                        onPressed: () {},
+                        onPressed: () {
+                          showRechargePopup(context);
+                        },
                         child: const Text("Recharge"),
                       ),
                     ),

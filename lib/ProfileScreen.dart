@@ -22,7 +22,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int coins = 0;
   bool isLoading = true;
 
-  final String playStoreUrl = "https://play.google.com/store/apps/details?id=com.example.coinlaundry";
+  final String playStoreUrl = "https://play.google.com/store/apps/details?id=com.coin.coinlaundry";
 
   @override
   void initState() {
@@ -206,7 +206,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _ProfileOption(
                     icon: Icons.feedback,
                     label: "Feedback",
-                    onTap: () => _launchUrl("https://play.google.com/store/apps/details?id=com.example.coinlaundry"),
+                    onTap: () => _launchUrl("https://play.google.com/store/apps/details?id=com.coin.coinlaundry"),
                   ),
                   _ProfileOption(
                     icon: Icons.description,

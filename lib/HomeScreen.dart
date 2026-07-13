@@ -25,6 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isLoading = true;
   List<dynamic> orders = [];
   int _selectedIndex = 0;
+  String _orderType = "self"; // self or drop
   Timer? _countdownTimer;
 
   @override
@@ -47,9 +48,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> fetchUserData() async {
+
+
+    print("::::::::::::::::::: fetch User data started:::::::::::::");
+
+
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
+
+      print("::::::::::::::::::: $token :::::::::::::");
+
+
       if (token == null) throw Exception("Token not found");
 
       final response = await http.get(
@@ -59,14 +69,43 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+
+        print("**********************");
+        print(data['coinBalance']);
+        print("**********************");
         userId = data['id'];
         userName = "${data['firstName']} ${data['lastName']}";
         coinBalance = data['coinBalance'] ?? 0;
-        await fetchOrders(userId!, token,"Self");
       } else if (response.statusCode == 401) {
         await handleTokenExpired();
       } else {
         userName = "Guest";
+      }
+
+
+      final walletResponse = await http.get(
+        Uri.parse('https://api.coinlaundryindia.com/users/$userId/wallets'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      print("**********************");
+      print(walletResponse);
+      print("**********************");
+
+      if (walletResponse.statusCode == 200) {
+        final List<dynamic> walletList = json.decode(walletResponse.body);
+        if (walletList.isNotEmpty) {
+          final wallet = walletList[0];
+          setState(() {
+            coinBalance = wallet['balance'] ?? 0;
+            isLoading = false;
+          });
+          await fetchOrders(userId!, token, _orderType);
+        } else {
+          print('No wallet found');
+        }
+      } else {
+        print("Failed to fetch wallet: ${walletResponse.body}");
       }
     } catch (e) {
       userName = "Guest";
@@ -77,7 +116,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> fetchOrders(int id, String token,String type) async {
+  Future<void> fetchOrders(int id, String token, String type) async {
     try {
       final response = await http.get(
         Uri.parse('https://api.coinlaundryindia.com/users/$id/orders'),
@@ -86,8 +125,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+        // Filter orders based on type
+        List<dynamic> filteredOrders = data.where((order) {
+          final operationType = order['opertationType'] ?? order['operationType'] ?? '';
+          if (type.toLowerCase() == 'self') return operationType.toLowerCase() == 'self operated';
+          if (type.toLowerCase() == 'drop') return operationType.toLowerCase() == 'drop off';
+          return true;
+        }).toList();
+
         setState(() {
-          orders = List.from(data.reversed);
+          orders = List.from(filteredOrders.reversed);
         });
       } else if (response.statusCode == 401) {
         await handleTokenExpired();
@@ -133,7 +180,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F8F8),
       body: SafeArea(
-
         child: isLoading
             ? const Center(child: CircularProgressIndicator())
             : (_selectedIndex == 4
@@ -163,7 +209,7 @@ class _HomeScreenState extends State<HomeScreen> {
           } else if (index == 2) {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const QRScannerScreen(orderType: 'self')),
+              MaterialPageRoute(builder: (context) =>  QRScannerScreen(orderType: 'self')),
             );
           } else if (index == 3 && userId != null) {
             Navigator.push(
@@ -247,69 +293,51 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Expanded(
                 child: ElevatedButton(
-                    // Navigator.push(
-                    //   context,
-                    //   MaterialPageRoute(builder: (context) => const QRScannerScreen(orderType: 'self')),
-                    // );
-                    onPressed: () async {
-                      setState(() => isLoading = true);
-
-                      final prefs = await SharedPreferences.getInstance();
-                      final token = prefs.getString('auth_token');
-
-                      if (userId != null && token != null) {
-                        await fetchOrders(userId!, token,"self");
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('User not logged in')),
-                        );
-                      }
-
-                      setState(() => isLoading = false);
-
-
+                  onPressed: () async {
+                    setState(() {
+                      _orderType = "self";
+                      isLoading = true;
+                    });
+                    final prefs = await SharedPreferences.getInstance();
+                    final token = prefs.getString('auth_token');
+                    if (userId != null && token != null) {
+                      await fetchOrders(userId!, token, "self");
+                    }
+                    setState(() => isLoading = false);
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black,
+                    backgroundColor: _orderType == "self" ? const Color(0xFF692C5A) : Colors.white,
+                    foregroundColor: _orderType == "self" ? Colors.white : Colors.black,
                     elevation: 0,
                     side: BorderSide(color: Colors.grey.shade300),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: const Text("Self Operated",style: const TextStyle(fontSize: 18)),
+                  child: const Text("Self Operated",style: TextStyle(fontSize: 18)),
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: ElevatedButton(
-                  // onPressed: () {
-                    // Navigator.push(
-                    //   context,
-                    //   MaterialPageRoute(builder: (context) => const QRScannerScreen(orderType: 'dropoff')),
-                    // );
                   onPressed: () async {
-                    setState(() => isLoading = true);
-
+                    setState(() {
+                      _orderType = "drop";
+                      isLoading = true;
+                    });
                     final prefs = await SharedPreferences.getInstance();
                     final token = prefs.getString('auth_token');
-
                     if (userId != null && token != null) {
-                    await fetchOrders(userId!, token,"drop");
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('User not logged in')),
-                      );
+                      await fetchOrders(userId!, token, "drop");
                     }
                     setState(() => isLoading = false);
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black,
+                    backgroundColor: _orderType == "drop" ? const Color(0xFF692C5A) : Colors.white,
+                    foregroundColor: _orderType == "drop" ? Colors.white : Colors.black,
                     elevation: 0,
                     side: BorderSide(color: Colors.grey.shade300),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: const Text("Drop Off",style: const TextStyle(fontSize: 18)),
+                  child: const Text("Drop Off",style: TextStyle(fontSize: 18)),
                 ),
               ),
             ],
@@ -322,9 +350,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildWashCard(dynamic order) {
-
-    print(order['btTrigger']);
-    String operation = order['opertationType'] ?? 'Unknown';
+    
+    print(order);
+    
+    
+    String operation = order['opertationType'] ?? order['operationType'] ??
+        'Unknown';
     String orderId = order['id']?.toString() ?? '';
     String paymentStatus = order['paymentStatus'] ?? 'N/A';
     String orderStatus = order['orderStatus'] ?? 'N/A';
@@ -332,168 +363,328 @@ class _HomeScreenState extends State<HomeScreen> {
     String startTime = order['startTime'] ?? '';
     String endTime = order['endTime'] ?? '';
     bool btTrigger = order['btTrigger'] ?? false;
-
-
+    String machinename = order['franchise']?['name'] ?? 'Unknown';
 
     DateTime? end = DateTime.tryParse(endTime)?.toLocal();
-    Duration timeLeft = end != null ? end.difference(DateTime.now()) : Duration.zero;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    Duration timeLeft = end != null ? end.difference(DateTime.now()) : Duration
+        .zero;
 
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              RichText(
-                text: TextSpan(
-                  text: "You chose ",
-                  style: const TextStyle(
-                    color: Colors.black,
-                    fontSize: 20,
-                  ),
-                  children: [
-                    TextSpan(
-                      text: operation,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                btTrigger ? "In progress" : "Not triggered",
-                style: TextStyle(
-                  color: btTrigger ? Colors.green : Colors.red,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14
-                ),
-              ),
-            ],
-          ),
 
-          Text(
-            "Order ID: $orderId",
-            style: const TextStyle(
-              color: Color(0xFF692C5A),
-              fontWeight: FontWeight.bold,
-              fontSize: 18
-            ),
-          ),
-          const Text("Estimated time for completing wash"),
-          const SizedBox(height: 12),
-          Center(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
+    if (operation == "self operated"){
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+            color: Colors.white, borderRadius: BorderRadius.circular(12)),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Icon(Icons.timer, color: Color(0xFF692C5A), size: 60),
-                const SizedBox(width: 8),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    timeLeft.isNegative
-                        ? const Text(
-                      "00:00:00",
-                      style: TextStyle(
-                        fontSize: 40,
-                        color: Color(0xFF692C5A),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    )
-                        : timeLeft.inSeconds < 60
-                        ? BlinkingCountdown(timeLeft: timeLeft)
-                        : Text(
-                      getRemainingTime(endTime),
-                      style: const TextStyle(
-                        fontSize: 26,
-                        color: Color(0xFF692C5A),
-                        fontWeight: FontWeight.bold,
-                      ),
+                RichText(
+                  text: TextSpan(
+                    text: "You choose ",
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 20,
                     ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      "Time remaining to complete wash",
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.black87,
+                    children: [
+                      TextSpan(
+                        text: operation,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                ),
+                Text(
+                  btTrigger ? orderStatus : "Not triggered",
+                  style: TextStyle(
+                    color: btTrigger ? Colors.green : Colors.red,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
                 ),
               ],
             ),
-          ),
+            Text(
+              "Order ID: $orderId",
+              style: const TextStyle(
+                color: Color(0xFF692C5A),
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
+            const Text("Estimated time for completing wash"),
+            const SizedBox(height: 12),
+            Center(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const Icon(Icons.timer, color: Color(0xFF692C5A), size: 60),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
 
 
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 40,
-                  child: ElevatedButton(
-                      style: ElevatedButton.styleFrom( backgroundColor: const Color(0xFF692C5A), // theme color
+                      !btTrigger
+                          ? const Text(
+                        "--:--:--",
+                        style: TextStyle(
+                          fontSize: 40,
+                          color: Color(0xFF692C5A),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      )
+                          : timeLeft.isNegative
+                          ? const Text(
+                        "00:00:00",
+                        style: TextStyle(
+                          fontSize: 40,
+                          color: Color(0xFF692C5A),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      )
+                          : timeLeft.inSeconds < 60
+                          ? BlinkingCountdown(timeLeft: timeLeft)
+                          : Text(
+                        getRemainingTime(endTime),
+                        style: const TextStyle(
+                          fontSize: 26,
+                          color: Color(0xFF692C5A),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        "Time remaining to complete wash",
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 40,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF692C5A),
                         foregroundColor: Colors.white,
-                        minimumSize: const Size(double.infinity, 48), // full width rectangle
+                        minimumSize: const Size(double.infinity, 48),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(0), // rectangular with slight curve
-                        ),),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => PaymentStatusScreen(
-                            orderId: orderId,
-                            paymentStatus: paymentStatus,
-                            amount: amount,
-                            dateTime: startTime,
-                          ),
+                          borderRadius: BorderRadius.circular(0),
                         ),
-                      );
-                    },
-                    child: const Text('Payment Status', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                PaymentStatusScreen(
+                                  orderId: orderId,
+                                  machinename:machinename,
+                                  orderstatus:orderStatus,
+                                  paymentStatus: paymentStatus,
+                                  amount: amount,
+                                  dateTime: startTime,
+                                ),
+                          ),
+                        );
+                      },
+                      child: const Text('Payment Status', style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold)),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 0),
-              Expanded(
-                child: SizedBox(
-                  height: 40,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF692C5A), // theme color
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size(double.infinity, 48), // full width rectangle
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(0), // rectangular with slight curve
-                      ),),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => PaymentStatusScreen(
-                            orderId: orderId,
-                            paymentStatus: paymentStatus,
-                            amount: amount,
-                            dateTime: startTime,
-                          ),
+                const SizedBox(width: 0),
+                Expanded(
+                  child: SizedBox(
+                    height: 40,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF692C5A),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 48),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(0),
                         ),
-                      );
-                    },
-                    child: const Text('Order Status', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                PaymentStatusScreen(
+                                  orderId: orderId,
+                                  machinename:machinename,
+                                  orderstatus:orderStatus,
+                                  paymentStatus: paymentStatus,
+                                  amount: amount,
+                                  dateTime: startTime,
+                                ),
+                          ),
+                        );
+                      },
+                      child: const Text('Order Status', style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold)),
+                    ),
                   ),
                 ),
-              ),
-            ],
-          )
-        ],
-      ),
+              ],
+            )
+          ],
+        ),
+      );
+
+  } else {
+  return Container(
+    margin: const EdgeInsets.only(bottom: 16),
+    decoration: BoxDecoration(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(12),
+    boxShadow: [
+    BoxShadow(
+    color: Colors.black.withOpacity(0.05),
+    blurRadius: 8,
+    offset: const Offset(0, 4),
+    )
+    ],
+    ),
+    child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+
+    /// --- TOP CONTENT ---
+    Padding(
+    padding: const EdgeInsets.all(16),
+    child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+
+    RichText(
+    text: TextSpan(
+    text: "You choose ",
+    style: const TextStyle(fontSize: 16, color: Colors.grey),
+    children: [
+    TextSpan(
+    text: operation,
+    style: const TextStyle(
+    fontWeight: FontWeight.bold,
+    color: Colors.black,
+    fontSize: 18,
+    ),
+    ),
+    ],
+    ),
+    ),
+
+    const SizedBox(height: 6),
+
+    Text("Order ID: $orderId",style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold,),
+    ),
+
+    const SizedBox(height: 4),
+
+    const Text(
+    "Track your wash",
+    style: TextStyle(fontSize: 14, color: Colors.grey),
+    ),
+
+    const SizedBox(height: 20),
+
+    _OrderTimeline(currentStep: 2),
+    ],
+    ),
+    ),
+
+    /// --- BOTTOM ACTION BAR ---
+    Row(
+    children: [
+    Expanded(
+    child: SizedBox(
+    height: 56,
+    child: ElevatedButton(
+    style: ElevatedButton.styleFrom(
+    backgroundColor: const Color(0xFF692C5A),
+    shape: const RoundedRectangleBorder(
+    borderRadius: BorderRadius.only(
+    bottomLeft: Radius.circular(12),
+    ),
+    ),
+    ),
+    onPressed: () {
+    Navigator.push(
+    context,
+    MaterialPageRoute(
+    builder: (_) => PaymentStatusScreen(
+    orderId: orderId,
+    orderstatus:orderStatus,
+    machinename: machinename,
+    paymentStatus: paymentStatus,
+    amount: amount,
+    dateTime: startTime,
+    ),
+    ),
     );
+    },
+    child: const Text(
+    "Payment Status",
+    style: TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.bold,
+    color: Colors.white,
+    ),
+    ),
+    ),
+    ),
+    ),
+    Expanded(
+    child: SizedBox(
+    height: 56,
+    child: ElevatedButton(
+    style: ElevatedButton.styleFrom(
+    backgroundColor: const Color(0xFF692C5A),
+    shape: const RoundedRectangleBorder(
+    borderRadius: BorderRadius.only(
+    bottomRight: Radius.circular(12),
+    ),
+    ),
+    ),
+    onPressed: () {},
+    child: const Text(
+    "Order Status",
+    style: TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.bold,
+    color: Colors.white,
+    ),
+    ),
+    ),
+    ),
+    ),
+    ],
+    ),
+    ],
+    ),
+    );
+    }
   }
 }
 
@@ -548,4 +739,45 @@ class _BlinkingCountdownState extends State<BlinkingCountdown> with SingleTicker
       ),
     );
   }
+
+
 }
+class _OrderTimeline extends StatelessWidget {
+  final int currentStep;
+  const _OrderTimeline({required this.currentStep});
+
+  @override
+  Widget build(BuildContext context) {
+    final steps = [
+      "Order Received",
+      "Wash Initiated",
+      "In Progress",
+      "Completed",
+      "Delivered"
+    ];
+
+    return Row(
+      children: List.generate(steps.length, (i) {
+        final done = i <= currentStep;
+        return Expanded(
+          child: Column(
+            children: [
+              CircleAvatar(
+                radius: 6,
+                backgroundColor:
+                done ? const Color(0xFF692C5A) : Colors.grey,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                steps[i],
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 10),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+}
+

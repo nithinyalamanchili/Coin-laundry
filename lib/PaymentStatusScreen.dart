@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 class PaymentStatusScreen extends StatelessWidget {
   final String orderId;
+  final String orderstatus;
+  final String machinename;
   final String paymentStatus;
   final int amount;
   final String dateTime;
@@ -9,9 +11,11 @@ class PaymentStatusScreen extends StatelessWidget {
   const PaymentStatusScreen({
     super.key,
     required this.orderId,
+    required this.orderstatus,
     required this.paymentStatus,
     required this.amount,
     required this.dateTime,
+    required this.machinename,
   });
 
   @override
@@ -75,7 +79,7 @@ class PaymentStatusScreen extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text("Order ID: $orderId", style: const TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 4),
-                          const Text("Machine Name: Testing7"),
+                          Text("Machine Name: $machinename"),
                           const SizedBox(height: 4),
                           Text(dateTime),
                         ],
@@ -85,9 +89,9 @@ class PaymentStatusScreen extends StatelessWidget {
                       width: double.infinity,
                       color: Colors.grey.shade300,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: const Center(
+                      child:  Center(
                         child: Text(
-                          "Order Status : Not Triggered",
+                          "Order Status : $orderstatus",
                           style: TextStyle(fontSize: 16),
                         ),
                       ),
